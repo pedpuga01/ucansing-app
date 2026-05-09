@@ -86,9 +86,9 @@ export default function AlumnosPage() {
                     <div className="flex flex-col gap-1">
                       {a.inscripciones?.length > 0 ? a.inscripciones.map((ins:any, i:number) => (
                         <span key={i} className="bg-blue-50 text-[#0466C8] text-[10px] px-2 py-1 rounded font-bold w-max border border-blue-100">
-                          {ins.clases?.disciplinas?.nombre} - {ins.clases?.dia_semana} {ins.clases?.hora_inicio.substring(0,5)}
+                          {ins.clases?.disciplinas?.nombre} - {ins.clases?.dia_semana} {ins.clases?.hora_inicio?.substring(0,5)}
                         </span>
-                      )) : <span className="text-[10px] text-red-500">Sin cursos</span>}
+                      )) : <span className="text-[10px] text-red-500">Sin cursos asignados</span>}
                     </div>
                   </td>
                   <td className="px-6 py-4"><p className="font-bold text-sm">{a.cuentas_familiares?.titular_nombre}</p><p className="text-[10px] text-slate-500">{a.cuentas_familiares?.email_contacto}</p></td>
@@ -104,13 +104,12 @@ export default function AlumnosPage() {
         </table>
       </div>
 
-      {/* MODAL FICHA */}
       {isFichaOpen && alumnoSeleccionado && (
         <div className="fixed inset-0 bg-[#0B132D]/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="bg-[#0B132D] p-6 text-white flex justify-between items-center">
               <div><h2 className="text-2xl font-bold">{alumnoSeleccionado.name}</h2></div>
-              <select value={alumnoSeleccionado.status} onChange={e=>actualizarEstado(alumnoSeleccionado.id, e.target.value)} className="text-black text-xs font-bold px-3 py-1 rounded">
+              <select value={alumnoSeleccionado.status} onChange={e=>actualizarEstado(alumnoSeleccionado.id, e.target.value)} className="text-black text-xs font-bold px-3 py-1 rounded outline-none">
                 <option value="Activo">Activo</option><option value="Congelado">Congelado</option><option value="Retirado">Retirado</option>
               </select>
             </div>
@@ -122,36 +121,44 @@ export default function AlumnosPage() {
             <div className="p-6 overflow-y-auto flex-1 bg-white">
               {tabActiva === "perfil" && (
                 <div className="space-y-4">
-                  <h3 className="font-bold text-slate-700">Cursos Inscritos:</h3>
-                  {alumnoSeleccionado.inscripciones?.map((ins:any, i:number) => (
-                    <div key={i} className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                      <p className="font-bold text-[#0B132D]">{ins.clases?.disciplinas?.nombre} ({ins.clases?.modalidad})</p>
-                      <p className="text-sm text-slate-600">Día: {ins.clases?.dia_semana} a las {ins.clases?.hora_inicio.substring(0,5)} | Prof: {ins.clases?.profesor}</p>
+                  <h3 className="font-bold text-slate-700 uppercase tracking-widest text-[10px]">Cursos Inscritos (Malla Logística):</h3>
+                  {alumnoSeleccionado.inscripciones?.length > 0 ? alumnoSeleccionado.inscripciones.map((ins:any, i:number) => (
+                    <div key={i} className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex justify-between items-center">
+                      <div>
+                        <p className="font-bold text-[#0B132D]">{ins.clases?.disciplinas?.nombre} ({ins.clases?.modalidad})</p>
+                        <p className="text-sm text-slate-600">Día: {ins.clases?.dia_semana} a las {ins.clases?.hora_inicio?.substring(0,5)} | Prof: {ins.clases?.profesor}</p>
+                      </div>
                     </div>
-                  ))}
+                  )) : <p className="text-sm text-slate-500">Sin cursos asociados.</p>}
                 </div>
               )}
               {tabActiva === "cuenta" && (
                 <div className="bg-orange-50 p-6 rounded-xl border border-orange-100">
-                  <h3 className="font-bold text-xl mb-2">{alumnoSeleccionado.cuentas_familiares?.titular_nombre} (Apoderado)</h3>
+                  <h3 className="font-bold text-xl mb-2">{alumnoSeleccionado.cuentas_familiares?.titular_nombre} (Titular de Cobro)</h3>
                   <p className="text-sm">Email: {alumnoSeleccionado.cuentas_familiares?.email_contacto}</p>
                   <p className="text-sm">RUT: {alumnoSeleccionado.cuentas_familiares?.titular_rut}</p>
+                  <p className="text-sm">Teléfono: {alumnoSeleccionado.cuentas_familiares?.telefono}</p>
                 </div>
               )}
               {tabActiva === "finanzas" && (
                 <div>
-                  <h3 className="font-black text-2xl mb-4">Mensualidad: {formatearDinero(alumnoSeleccionado.mensualidad_final)}</h3>
+                  <h3 className="font-black text-2xl mb-4 text-[#0B132D]">A Pagar: {formatearDinero(alumnoSeleccionado.mensualidad_final)}</h3>
                   <div className="space-y-2">
-                    {historialPagos.map(t=>(
-                       <div key={t.id} className="flex justify-between bg-slate-50 p-3 rounded-lg border border-slate-200">
-                         <span>{t.tipo_pago} ({t.mes_imputado})</span><span className="font-bold text-green-600">+{formatearDinero(t.monto)}</span>
+                    {historialPagos.length === 0 ? <p className="text-sm text-slate-400">Sin pagos registrados.</p> : 
+                     historialPagos.map(t=>(
+                       <div key={t.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                         <div>
+                          <p className="text-sm font-bold">{t.tipo_pago}</p>
+                          <p className="text-[10px] text-slate-500 uppercase">{t.mes_imputado}</p>
+                         </div>
+                         <span className="font-bold text-green-600">+{formatearDinero(t.monto)}</span>
                        </div>
                     ))}
                   </div>
                 </div>
               )}
             </div>
-            <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={()=>setIsFichaOpen(false)} className="px-6 py-2 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300">Cerrar</button></div>
+            <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={()=>setIsFichaOpen(false)} className="px-6 py-2 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300">Cerrar Ficha</button></div>
           </div>
         </div>
       )}
