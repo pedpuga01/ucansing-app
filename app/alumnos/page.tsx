@@ -96,7 +96,7 @@ export default function AlumnosPage() {
                     {!isActivo ? <span className="text-xs text-slate-400">-</span> : pagosDelMes.includes(a.id) ? <span className="text-[10px] font-bold text-green-700 bg-green-50 px-3 py-1 rounded-full">Al Día</span> : <span className="text-[10px] font-bold text-[#D20505] bg-red-50 px-3 py-1 rounded-full">Pendiente</span>}
                     <p className="font-black text-xs mt-1">{formatearDinero(a.mensualidad_final)}</p>
                   </td>
-                  <td className="px-6 py-4 text-right"><button onClick={()=>abrirFicha(a)} className="bg-[#0B132D] text-white px-4 py-2 rounded-xl text-xs font-bold">Ver Ficha</button></td>
+                  <td className="px-6 py-4 text-right"><button onClick={()=>abrirFicha(a)} className="bg-[#0B132D] text-white px-4 py-2 rounded-xl text-xs font-bold hover:-translate-y-0.5 transition-transform">Ver Ficha</button></td>
                 </tr>
               )
             })}

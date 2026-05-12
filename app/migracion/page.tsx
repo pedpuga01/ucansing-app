@@ -2,196 +2,234 @@
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
+// Inicializamos Supabase
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function MigracionPage() {
-  const [tipoMigracion, setTipoMigracion] = useState("alumnos");
+type ErrorMigracion = {
+  fila: number;
+  alumno: string;
+  mensajeTecnico: string;
+  causaSugerida: string;
+};
+
+export default function MigracionSaaSPage() {
   const [archivoBase, setArchivoBase] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [progreso, setProgreso] = useState({ actual: 0, total: 0 });
-
-  function agregarLog(mensaje: string) { setLogs(prev => [mensaje, ...prev]); }
-
-  const limpiarDinero = (val: string) => val ? Number(val.toString().replace(/[^0-9]/g, '')) || 0 : 0;
   
-  const formatearFecha = (fechaStr: string) => {
-    if (!fechaStr) return null;
-    const parts = fechaStr.toString().split(/[\/\-]/);
-    if (parts.length === 3) {
-      let d = parts[0], m = parts[1], y = parts[2];
-      if (y.length === 2) y = "20" + y;
-      return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-    }
-    return fechaStr;
+  const [listaErrores, setListaErrores] = useState<ErrorMigracion[]>([]);
+  const [mostrarModalErrores, setMostrarModalErrores] = useState(false);
+
+  const agregarLog = (m: string) => setLogs(prev => [m, ...prev]);
+  const cleanDinero = (val: string) => val ? Number(val.replace(/[^0-9]/g, '')) || 0 : 0;
+
+  // Evita el error "Invalid time value"
+  const parsearFechaSegura = (fechaStr: string) => {
+    if (!fechaStr || fechaStr.trim() === "") return null;
+    const d = new Date(fechaStr);
+    if (isNaN(d.getTime())) return null; 
+    return d.toISOString();
   };
 
-  async function asegurarClase(curso: string, profe: string, dia: string, hora: string, nombreAlumno: string) {
-    if (!curso || !profe || !dia || !hora) return null;
-    let hr = hora.toString().trim(); if(hr.length === 4) hr = "0" + hr;
-    
-    let modalidad = "Individual";
-    if (curso.toLowerCase().includes("grupal")) modalidad = "Grupal";
-    else if (curso.toLowerCase().includes("duo") || curso.toLowerCase().includes("dúo")) modalidad = "Duo";
-    
-    let disc = curso.replace(/individual|grupal|duo|dúo/i, "").trim();
-    
-    // 1. Disciplina
-    let { data: dD } = await supabase.from("disciplinas").select("id").ilike("nombre", disc).limit(1);
-    let dId = dD?.[0]?.id;
-    if(!dId) { const {data} = await supabase.from("disciplinas").insert([{nombre: disc, precio_base: 82000}]).select().single(); dId = data?.id; }
-    
-    // 2. Profesor
-    let { data: pD } = await supabase.from("profesores").select("id").ilike("nombre", profe).limit(1);
-    if(!pD?.length) await supabase.from("profesores").insert([{nombre: profe, estado: 'Activo'}]);
-    
-    // 3. Clase
-    if (modalidad !== "Individual") {
-      let { data: cD } = await supabase.from("clases").select("id").eq("disciplina_id", dId).eq("dia_semana", dia).eq("hora_inicio", hr).ilike("profesor", profe).limit(1);
-      if(cD?.[0]?.id) return cD[0].id;
-    }
-    
-    // Si no existe el grupo o es Individual, la creamos
-    let claseSala = modalidad === "Individual" ? `Clase de ${nombreAlumno}` : "Sala Automática";
-    let cap = modalidad === "Grupal" ? 6 : (modalidad === "Duo" ? 2 : 1);
-    const { data: nC } = await supabase.from("clases").insert([{
-      disciplina_id: dId, modalidad: modalidad, dia_semana: dia, hora_inicio: hr, profesor: profe, sala: claseSala, capacidad_max: cap
-    }]).select().single();
-    
-    return nC?.id;
+  // Determinar Tipo de Curso
+  const determinarTipoCurso = (nombre: string) => {
+    const n = nombre.toLowerCase();
+    if (n.includes("individual")) return "INDIVIDUAL";
+    if (n.includes("dúo") || n.includes("duo")) return "DUO";
+    return "GRUPAL";
+  };
+
+  async function limpiarBaseDeDatos() {
+    if (!confirm("⚠️ ¿Estás seguro? Esto borrará TODAS las cuentas, alumnos y clases actuales para volver a migrar.")) return;
+    setIsProcessing(true);
+    setLogs(["🧹 Iniciando limpieza de base de datos..."]);
+    await supabase.from("academias").delete().neq("id", "00000000-0000-0000-0000-000000000000"); 
+    agregarLog("✅ Base de datos limpia. Lista para nueva migración.");
+    setIsProcessing(false);
   }
 
-  function parseCSVLine(line: string, delimiter: string) {
-    let inQuotes = false, val = '', parsed = [];
-    for (let i = 0; i < line.length; i++) {
-      let char = line[i];
-      if (char === '"') inQuotes = !inQuotes;
-      else if (char === delimiter && !inQuotes) { parsed.push(val.trim()); val = ''; } 
-      else val += char;
-    }
-    parsed.push(val.trim());
-    return parsed;
+  async function asegurarClase(academiaId: string, row: any, num: number) {
+    const nombreClase = row[`Curso ${num}`] || row["Curso"];
+    const profesor = row[`Profesor ${num}`] || row["Profesor"];
+    
+    if (!nombreClase || !profesor) return null;
+
+    let { data: existente } = await supabase
+      .from("clases")
+      .select("id")
+      .eq("academia_id", academiaId)
+      .ilike("nombre", nombreClase)
+      .ilike("profesor", profesor)
+      .limit(1);
+
+    if (existente?.[0]?.id) return existente[0].id;
+
+    const { data: nueva, error } = await supabase
+      .from("clases")
+      .insert([{
+        academia_id: academiaId,
+        nombre: nombreClase,
+        profesor: profesor,
+        tipo: determinarTipoCurso(nombreClase),
+        tarifa_base: cleanDinero(row["Mensualidad Base ($)"])
+      }])
+      .select()
+      .single();
+
+    if (error) throw new Error(`Error creando curso ${nombreClase}: ${error.message}`);
+    return nueva?.id;
   }
 
   async function iniciarMigracion() {
-    if (!archivoBase) return alert("Selecciona un archivo.");
-    setIsProcessing(true); setLogs([]);
-    agregarLog("🚀 Iniciando Motor de Migración V4 (Multicurso)...");
+    if (!archivoBase) return;
+    setIsProcessing(true); 
+    setLogs(["🚀 Iniciando migración SaaS (Modo Forzado & Asociativo)..."]);
+    setListaErrores([]); 
+
+    let { data: academia } = await supabase.from("academias").select("id").limit(1).single();
+    let academiaId = academia?.id;
+
+    if (!academiaId) {
+      const { data: nuevaAcademia } = await supabase.from("academias").insert([{ nombre: "UCANSING Central", subdominio: "central" }]).select().single();
+      academiaId = nuevaAcademia?.id;
+    }
 
     const reader = new FileReader();
     reader.onload = async (e) => {
-      try {
-        const text = e.target?.result as string;
-        const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-        const delimiter = lines[0].includes(';') ? ';' : ',';
-        const headers = parseCSVLine(lines[0], delimiter).map(h => h.trim());
-        
-        for (let i = 1; i < lines.length; i++) {
-          const values = parseCSVLine(lines[i], delimiter);
-          const row: any = {};
-          headers.forEach((h, idx) => { row[h] = values[idx]; });
+      const lines = (e.target?.result as string).split(/\r?\n/).filter(l => l.trim());
+      const sep = lines[0].includes(';') ? ';' : ',';
+      const headers = lines[0].split(sep).map(h => h.trim());
+      
+      const erroresTemporales: ErrorMigracion[] = [];
 
-          try {
-            if (tipoMigracion === "prospectos") {
-              const isPagada = row["Prueba Pagada"]?.toLowerCase() === 'sí' || row["Prueba Pagada"]?.toLowerCase() === 'si' || row["Prueba Pagada"]?.toLowerCase() === 'true';
-              await supabase.from("leads").insert([{
-                name: row["Nombre Alumno"], fecha_nacimiento: formatearFecha(row["Fecha Nacimiento"]),
-                nombre_apoderado: row["Nombre Apoderado"], email: row["Email Contacto"], phone: row["Teléfono"],
-                clase_interes: row["Clase de Interés"], clase_prueba_asignada: row["Clase de Prueba Asignada"],
-                fecha_prueba: formatearFecha(row["Fecha Prueba"]), hora_prueba: row["Hora Prueba"],
-                profesor_prueba: row["Profesor Prueba"], costo_prueba: limpiarDinero(row["Costo Prueba ($)"]),
-                prueba_pagada: isPagada, status: row["Estado"] || "Nuevo Contacto"
+      for (let i = 1; i < lines.length; i++) {
+        const row: any = {};
+        const currentLine = lines[i].split(new RegExp(`${sep}(?=(?:(?:[^"]*"){2})*[^"]*$)`));
+        currentLine.forEach((v, idx) => { row[headers[idx]] = v.replace(/^"|"$/g, '').trim(); });
+
+        try {
+          const email = row["Email Contacto"] || "";
+          const nombreAlumno = row["Nombre Alumno"] || `Desconocido (Fila ${i})`;
+          const rutReal = row["RUT Apoderado"] || row["RUT"] || `RUT-MIG-${i}`;
+
+          // 1. Cuenta Familiar
+          let cId = null;
+          let { data: cuentaExRut } = await supabase.from("cuentas_familiares").select("id").eq("rut", rutReal).limit(1);
+          if (cuentaExRut?.[0]?.id) cId = cuentaExRut[0].id;
+          else if (email) {
+            let { data: cuentaExEmail } = await supabase.from("cuentas_familiares").select("id").eq("email_contacto", email).limit(1);
+            if (cuentaExEmail?.[0]?.id) cId = cuentaExEmail[0].id;
+          }
+          
+          if (!cId) {
+            const { data, error: errC } = await supabase.from("cuentas_familiares").insert([{
+              academia_id: academiaId,
+              titular_nombre: row["Nombre Apoderado"] || row["Nombre Alumno"] || `Titular Fila ${i}`,
+              rut: rutReal,
+              email_contacto: email || `sin-email-${i}@ucansing.cl`,
+              telefono: row["Teléfono"] || ""
+            }]).select().single();
+            if (errC) throw new Error(`Error en Cuenta: ${errC.message}`);
+            cId = data?.id;
+          }
+
+          // 2. Alumno
+          const { data: al, error: errA } = await supabase.from("alumnos").insert([{
+            cuenta_familiar_id: cId,
+            nombre: nombreAlumno,
+            fecha_nacimiento: parsearFechaSegura(row["Fecha Nacimiento"]),
+          }]).select().single();
+          if (errA) throw new Error(`Error en Alumno: ${errA.message}`);
+
+          // 3. Inscripciones a Cursos
+          for (let n = 1; n <= 2; n++) {
+            const cursoId = await asegurarClase(academiaId!, row, n);
+            if (cursoId) {
+              await supabase.from("inscripciones").insert([{
+                alumno_id: al.id,
+                clase_id: cursoId,
+                precio_final_con_descuento: cleanDinero(row["Mensualidad Final ($)"]) || cleanDinero(row["Mensualidad Base ($)"]),
+                dia_semana: row[`Día Clase ${n}`] || row["Día Clase"] || "Sin asignar",
+                hora_inicio: row[`Hora Clase ${n}`] || row["Hora Clase"] || null,
+                estado: row["Estado Alumno"] === "Activo" ? "ACTIVO" : "RETIRADO"
               }]);
-            } else {
-              // 1. Cuenta
-              const email = row["Email Contacto"];
-              if (!email || !row["Nombre Alumno"]) throw new Error("Fila inválida (Falta nombre o email)");
-              let { data: cEx } = await supabase.from("cuentas_familiares").select("id").eq("email_contacto", email).limit(1);
-              let cId = cEx?.[0]?.id;
-              if(!cId) {
-                const { data: nC } = await supabase.from("cuentas_familiares").insert([{
-                  titular_nombre: row["Nombre Apoderado"] || row["Nombre Alumno"], titular_rut: row["RUT Apoderado"] || row["RUT"],
-                  email_contacto: email, telefono: row["Teléfono"], direccion_calle: row["Calle"], direccion_comuna: row["Comuna"]
-                }]).select().single();
-                cId = nC?.id;
-              }
-
-              // 2. Alumno (Sin clase_id)
-              const { data: al, error: errAl } = await supabase.from("students").insert([{
-                cuenta_id: cId, name: row["Nombre Alumno"], email: email, phone: row["Teléfono"],
-                fecha_nacimiento: formatearFecha(row["Fecha Nacimiento"]), fecha_ingreso: formatearFecha(row["Fecha de Ingreso"]),
-                status: row["Estado Alumno"] || "Activo",
-                precio_base: limpiarDinero(row["Mensualidad Base ($)"]), descuento_aplicado: limpiarDinero(row["Descuento Aplicado ($)"]),
-                mensualidad_final: limpiarDinero(row["Mensualidad Final ($)"]) || limpiarDinero(row["Prorrateo Curso ($)"])
-              }]).select().single();
-
-              if (errAl) throw errAl;
-
-              // 3. Inscripciones Múltiples
-              const c1 = await asegurarClase(row["Curso 1"] || row["Curso"], row["Profesor 1"] || row["Profesor"], row["Día Clase 1"] || row["Día Clase"] || row["Dia Clase 1"], row["Hora Clase 1"] || row["Hora Clase"], row["Nombre Alumno"]);
-              if(c1) await supabase.from("inscripciones").insert([{student_id: al.id, clase_id: c1}]);
-              
-              const c2 = await asegurarClase(row["Curso 2"], row["Profesor 2"], row["Día Clase 2"] || row["Dìa Clase 2"], row["Hora Clase 2"], row["Nombre Alumno"]);
-              if(c2) await supabase.from("inscripciones").insert([{student_id: al.id, clase_id: c2}]);
             }
-            agregarLog(`✅ Migrado exitosamente: ${row["Nombre Alumno"]}`);
-          } catch(err:any) { agregarLog(`❌ Fila ${i} (${row["Nombre Alumno"]}): ${err.message}`); }
-          setProgreso({ actual: i, total: lines.length - 1 });
+          }
+
+          agregarLog(`✅ Migrado exitosamente: ${nombreAlumno}`);
+        } catch(err:any) { 
+          const msg = err.message || "Error desconocido";
+          agregarLog(`❌ Error fila ${i}: ${msg}`);
+          erroresTemporales.push({ fila: i + 1, alumno: row["Nombre Alumno"] || "Fila sin nombre", mensajeTecnico: msg, causaSugerida: "Revisar datos o formato en Excel." });
         }
-        agregarLog(`✨ PROCESO FINALIZADO.`);
-      } catch(err:any) { agregarLog(`❌ ERROR FATAL: ${err.message}`); }
+      }
+      
+      agregarLog("🎉 PROCESAMIENTO COMPLETADO");
       setIsProcessing(false);
+
+      if (erroresTemporales.length > 0) {
+        setListaErrores(erroresTemporales);
+        setMostrarModalErrores(true);
+      }
     };
     reader.readAsText(archivoBase);
   }
 
   return (
-    <div className="p-10 space-y-8 min-h-screen">
-      <div>
-        <h1 className="text-3xl font-bold text-[#0B132D] tracking-tight">Gestor de Datos (CSV)</h1>
-        <p className="text-[#64748B] mt-1 font-medium">Motor de inyección directa a la base de datos multicurso.</p>
+    <div className="p-10 space-y-8 min-h-screen bg-gray-50 relative">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold text-slate-800">Inyector de Datos SaaS</h1>
+        <button onClick={limpiarBaseDeDatos} disabled={isProcessing} className="bg-red-100 text-red-600 px-4 py-2 rounded-lg font-semibold hover:bg-red-200 transition">
+          🗑️ Limpiar Base de Datos
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <div className="saas-card p-8 border-t-4 border-t-[#FC6827]">
-            <div className="flex bg-slate-100 rounded-xl p-1 mb-6">
-              <button onClick={() => setTipoMigracion("prospectos")} className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${tipoMigracion === 'prospectos' ? 'bg-white shadow-sm text-[#0B132D]' : 'text-slate-500'}`}>1. Prospectos</button>
-              <button onClick={() => setTipoMigracion("alumnos")} className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${tipoMigracion === 'alumnos' ? 'bg-white shadow-sm text-[#0B132D]' : 'text-slate-500'}`}>2. Alumnos Activos</button>
-            </div>
-            
-            <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center hover:bg-slate-50 transition-colors">
-              <div className="text-4xl mb-3 grayscale opacity-50">📁</div>
-              <label className="cursor-pointer">
-                <span className="bg-[#0B132D] text-white px-6 py-2.5 rounded-xl font-bold shadow-sm inline-block mb-3">Seleccionar CSV</span>
-                <input type="file" accept=".csv" onChange={e => setArchivoBase(e.target.files?.[0] || null)} className="hidden" disabled={isProcessing} />
-              </label>
-              <p className="text-xs text-slate-500 font-medium">{archivoBase ? <span className="text-[#0466C8] font-bold">{archivoBase.name}</span> : "Selecciona tu archivo exportado."}</p>
-            </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+        <p className="text-slate-500 mb-6">Sube el archivo <b>Gestion UCS - 2026 - Alumnos Activos.csv</b>.</p>
+        <input type="file" accept=".csv" onChange={e => setArchivoBase(e.target.files?.[0] || null)} className="mb-6 block w-full text-sm text-slate-500 file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100" />
+        <button onClick={iniciarMigracion} disabled={isProcessing || !archivoBase} className={`px-6 py-3 rounded-xl font-bold w-full transition ${isProcessing || !archivoBase ? "bg-slate-300 text-slate-500" : "bg-orange-600 text-white hover:bg-orange-700"}`}>
+          {isProcessing ? "Procesando Migración..." : "Inyectar Datos desde CSV"}
+        </button>
 
-            <button onClick={iniciarMigracion} disabled={isProcessing || !archivoBase} className="w-full mt-6 bg-[#FC6827] text-white py-3.5 rounded-xl font-bold shadow-lg hover:-translate-y-0.5 transition-transform disabled:opacity-50">
-              {isProcessing ? "Procesando..." : `Inyectar ${tipoMigracion.toUpperCase()}`}
-            </button>
-          </div>
-        </div>
-
-        <div className="saas-card p-0 overflow-hidden bg-[#0B132D] flex flex-col h-[550px]">
-          <div className="p-5 border-b border-white/10 flex justify-between items-center bg-black/20">
-            <h2 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Terminal Logística</h2>
-            {isProcessing && <span className="text-xs text-[#FC6827] font-black">{progreso.total > 0 ? Math.round((progreso.actual / progreso.total) * 100) : 0}%</span>}
-          </div>
-          <div className="p-5 flex-1 overflow-y-auto font-mono text-[10px] space-y-2 custom-scrollbar">
-            {logs.map((log, index) => (
-              <p key={index} className={`${log.includes('ERROR') ? 'text-red-400 font-bold' : log.includes('FINALIZADO') ? 'text-green-400 font-black' : 'text-slate-300'}`}>
-                <span className="opacity-40 mr-2">[{new Date().toLocaleTimeString()}]</span> {log}
-              </p>
-            ))}
-          </div>
-        </div>
+        {listaErrores.length > 0 && (
+          <button onClick={() => setMostrarModalErrores(true)} className="mt-4 text-red-600 font-semibold text-sm underline w-full text-center hover:text-red-800">
+            ⚠️ Ver {listaErrores.length} errores detectados
+          </button>
+        )}
       </div>
+
+      <div className="bg-slate-900 text-green-400 p-6 rounded-2xl font-mono text-sm h-80 overflow-y-auto shadow-inner">
+        <div className="sticky top-0 bg-slate-900 pb-2 border-b border-slate-700 mb-2 font-bold text-white">Terminal de Migración</div>
+        {logs.map((l, i) => <p key={i} className="mb-1">{l}</p>)}
+      </div>
+
+      {mostrarModalErrores && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="bg-red-50 p-6 flex justify-between items-center border-b border-red-100">
+              <h2 className="text-2xl font-bold text-red-700">⚠️ Reporte de Conflictos</h2>
+              <button onClick={() => setMostrarModalErrores(false)} className="bg-red-100 hover:bg-red-200 text-red-700 p-2 rounded-full font-bold">✕</button>
+            </div>
+            <div className="overflow-y-auto p-6 bg-slate-50 flex-1 space-y-4">
+              {listaErrores.map((err, idx) => (
+                <div key={idx} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex justify-between mb-3">
+                    <span className="bg-orange-100 text-orange-800 text-xs font-bold px-3 py-1 rounded-full">Fila {err.fila}</span>
+                    <span className="font-semibold">{err.alumno}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-red-50 p-3 rounded-lg"><p className="text-xs text-red-400 font-bold mb-1">Sugerencia</p><p className="text-sm text-red-700">{err.causaSugerida}</p></div>
+                    <div className="bg-slate-900 p-3 rounded-lg"><p className="text-xs text-slate-400 font-bold mb-1">Log Técnico</p><p className="text-xs text-green-400 font-mono break-words">{err.mensajeTecnico}</p></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

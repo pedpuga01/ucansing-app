@@ -10,24 +10,21 @@ const supabase = createClient(
 export default function ProspectosPage() {
   const [isLoading, setIsLoading] = useState(true);
   
-  // Datos Globales
   const [prospectos, setProspectos] = useState<any[]>([]);
-  const [clasesCatalogo, setClasesCatalogo] = useState<any[]>([]); // Para validar choques y ver grupos
-  const [disciplinas, setDisciplinas] = useState<any[]>([]); // Servicios y precios
+  const [clasesCatalogo, setClasesCatalogo] = useState<any[]>([]);
+  const [disciplinas, setDisciplinas] = useState<any[]>([]);
   const [profesoresList, setProfesoresList] = useState<any[]>([]);
-  const [cuentasExistentes, setCuentasExistentes] = useState<any[]>([]); // Para el buscador de apoderados
+  const [cuentasExistentes, setCuentasExistentes] = useState<any[]>([]);
   const [valorMatriculaBase, setValorMatriculaBase] = useState(30000);
 
   const cursosDisponibles = ["Canto Individual", "Canto Grupal", "Piano Individual", "Piano Grupal", "Guitarra Individual", "Guitarra Grupal"];
   const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
-  // Modales
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAgendaModalOpen, setIsAgendaModalOpen] = useState(false);
   const [isMatriculaModalOpen, setIsMatriculaModalOpen] = useState(false);
   const [prospectoSeleccionado, setProspectoSeleccionado] = useState<any>(null);
 
-  // Estados Prospecto Simple
   const [nombre, setNombre] = useState(""); const [fechaNac, setFechaNac] = useState(""); 
   const [apoderado, setApoderado] = useState(""); const [email, setEmail] = useState(""); 
   const [telefono, setTelefono] = useState(""); const [interes, setInteres] = useState("");
@@ -35,11 +32,6 @@ export default function ProspectosPage() {
   const [horaPrueba, setHoraPrueba] = useState(""); const [profesorPrueba, setProfesorPrueba] = useState(""); 
   const [costoPrueba, setCostoPrueba] = useState(0);
   
-  // ==========================================
-  // MOTOR DE MATRÍCULA V4 (INTELIGENTE)
-  // ==========================================
-  
-  // 1. Estados Titular (Cuenta)
   const [busquedaCuenta, setBusquedaCuenta] = useState("");
   const [cuentaSeleccionadaId, setCuentaSeleccionadaId] = useState<string | null>(null);
   const [titularNombre, setTitularNombre] = useState("");
@@ -47,17 +39,16 @@ export default function ProspectosPage() {
   const [titularEmail, setTitularEmail] = useState("");
   const [titularTelefono, setTitularTelefono] = useState("");
 
-  // 2. Estados Logística / Finanzas
   const [fechaInicio, setFechaInicio] = useState("");
   const [cobrarMatricula, setCobrarMatricula] = useState(true);
   const [descuentoTotal, setDescuentoTotal] = useState(0);
   const [cursosAInscribir, setCursosAInscribir] = useState<any[]>([]);
   
-  // 3. Formulario "Añadir Curso"
-  const [modoClase, setModoClase] = useState("existente"); // 'existente' | 'nueva'
+  const [modoClase, setModoClase] = useState("existente");
   const [claseExistenteId, setClaseExistenteId] = useState("");
   
   const [addServicioId, setAddServicioId] = useState("");
+  const [addModalidad, setAddModalidad] = useState("Individual"); // NUEVO: Selector de Modalidad
   const [addProfesor, setAddProfesor] = useState("");
   const [addDia, setAddDia] = useState("Lunes");
   const [addHora, setAddHora] = useState("");
@@ -76,11 +67,9 @@ export default function ProspectosPage() {
     const { data: dData } = await supabase.from("disciplinas").select("*").order("nombre");
     if (dData) setDisciplinas(dData);
 
-    // Cargar clases para el selector de Grupos y para validar choques
     const { data: cData } = await supabase.from("clases").select("*, disciplinas(nombre), inscripciones(count)");
     if (cData) setClasesCatalogo(cData);
 
-    // Cargar cuentas para el buscador
     const { data: cuentas } = await supabase.from("cuentas_familiares").select("*");
     if (cuentas) setCuentasExistentes(cuentas);
 
@@ -90,7 +79,6 @@ export default function ProspectosPage() {
     setIsLoading(false);
   }
 
-  // --- MÉTODOS DE PROSPECTOS ---
   async function guardarProspecto() {
     if (!nombre || !email || !fechaNac) return alert("Faltan datos obligatorios.");
     const { error } = await supabase.from("leads").insert([{ name: nombre, email, phone: telefono, fecha_nacimiento: fechaNac, nombre_apoderado: apoderado, clase_interes: interes, status: "Nuevo Contacto" }]);
@@ -112,16 +100,14 @@ export default function ProspectosPage() {
     if (!errLead) {
       const mesActualStr = new Date().toISOString().slice(0, 7);
       await supabase.from("transacciones").insert([{ student_id: null, tipo_pago: "Ingreso Extra", metodo_pago: "Transferencia", mes_imputado: mesActualStr, monto: p.costo_prueba, detalle: `Pago clase de prueba - Prospecto: ${p.name}` }]);
-      cargarDatos(); alert("¡Pago registrado en el libro mayor con éxito!");
-    } else alert("Hubo un error: " + errLead.message);
+      cargarDatos(); alert("¡Pago registrado con éxito!");
+    } else alert("Error: " + errLead.message);
   }
 
-  // --- LÓGICA DE MATRÍCULA ---
   function abrirMatricula(p: any) {
     setProspectoSeleccionado(p); setCursosAInscribir([]); setDescuentoTotal(0); setCobrarMatricula(true); 
     setFechaInicio(new Date().toISOString().split('T')[0]);
     
-    // Auto-prellenar con datos del prospecto (Puede sobreescribirlos)
     setCuentaSeleccionadaId(null); setBusquedaCuenta("");
     setTitularNombre(p.nombre_apoderado || p.name); 
     setTitularEmail(p.email); 
@@ -148,10 +134,8 @@ export default function ProspectosPage() {
     setTitularRut("");
   }
 
-  // Comprobar si el profesor está ocupado
   const isProfesorOcupado = () => {
     if (!addProfesor || !addDia || !addHora) return false;
-    // Formato hora db: "18:00:00", addHora: "18:00"
     return clasesCatalogo.some(c => c.profesor === addProfesor && c.dia_semana === addDia && c.hora_inicio.startsWith(addHora));
   };
 
@@ -164,6 +148,7 @@ export default function ProspectosPage() {
         tipo: 'existente',
         claseId: claseExistenteId,
         servicioNombre: claseSelect.disciplinas?.nombre,
+        modalidad: claseSelect.modalidad,
         profesor: claseSelect.profesor,
         dia: claseSelect.dia_semana,
         hora: claseSelect.hora_inicio.substring(0,5),
@@ -172,7 +157,7 @@ export default function ProspectosPage() {
       }]);
       setClaseExistenteId("");
     } else {
-      if (!addServicioId || !addProfesor || !addHora) return alert("Faltan datos para crear la clase.");
+      if (!addServicioId || !addModalidad || !addProfesor || !addHora) return alert("Faltan datos para crear la clase.");
       if (isProfesorOcupado()) return alert("El profesor ya tiene una clase asignada en ese horario.");
 
       const servicio = disciplinas.find(d => d.id === addServicioId);
@@ -180,12 +165,13 @@ export default function ProspectosPage() {
         id: Date.now(),
         tipo: 'nueva',
         disciplinaId: addServicioId,
-        servicioNombre: servicio.nombre,
+        servicioNombre: servicio?.nombre,
+        modalidad: addModalidad,
         profesor: addProfesor,
         dia: addDia,
         hora: addHora,
         clasesRestantes: addClasesRestantes,
-        precioBase: servicio.precio_base || 82000
+        precioBase: servicio?.precio_base || 82000
       }]);
       setAddHora("");
     }
@@ -196,7 +182,6 @@ export default function ProspectosPage() {
     setCursosAInscribir(cursosAInscribir.filter(c => c.id !== id));
   }
 
-  // Matemáticas Financieras Inteligentes
   const sumaMensualidadBase = cursosAInscribir.reduce((acc, c) => acc + c.precioBase, 0);
   const mensualidadFinal = Math.max(sumaMensualidadBase - descuentoTotal, 0);
   
@@ -213,7 +198,6 @@ export default function ProspectosPage() {
     setIsLoading(true);
     
     try {
-      // 1. Cuenta Familiar (Usar existente o crear nueva)
       let cId = cuentaSeleccionadaId;
       if (!cId) {
         const { data: nC, error: errCuenta } = await supabase.from("cuentas_familiares").insert([{
@@ -222,11 +206,9 @@ export default function ProspectosPage() {
         if (errCuenta) throw errCuenta;
         cId = nC.id;
       } else {
-        // Actualizamos los datos por si los editó
         await supabase.from("cuentas_familiares").update({ titular_nombre: titularNombre, titular_rut: titularRut, telefono: titularTelefono }).eq("id", cId);
       }
 
-      // 2. Insertar Alumno
       const { data: alumno, error: errorAlumno } = await supabase.from("students").insert([{
         cuenta_id: cId, name: prospectoSeleccionado.name, email: prospectoSeleccionado.email, phone: prospectoSeleccionado.phone,
         fecha_nacimiento: prospectoSeleccionado.fecha_nacimiento, fecha_ingreso: fechaInicio, precio_base: sumaMensualidadBase, 
@@ -235,25 +217,19 @@ export default function ProspectosPage() {
 
       if (errorAlumno) throw errorAlumno;
 
-      // 3. Crear Clases e Inscribir
       for (const curso of cursosAInscribir) {
         let claseFinalId = curso.claseId;
         
-        // Si el curso es "nuevo", lo creamos en la base de datos
         if (curso.tipo === 'nueva') {
-          let modalidad = "Individual";
-          if (curso.servicioNombre.toLowerCase().includes("grupal")) modalidad = "Grupal";
-          else if (curso.servicioNombre.toLowerCase().includes("duo") || curso.servicioNombre.toLowerCase().includes("dúo")) modalidad = "Duo";
-
-          // Nombre inteligente
-          let claseSala = modalidad === "Individual" 
-            ? `${curso.servicioNombre.replace("Individual", "").trim()} Individual, ${prospectoSeleccionado.name}` 
+          const mod = curso.modalidad || "Individual";
+          let claseSala = mod === "Individual" 
+            ? `Clase de ${prospectoSeleccionado.name}` 
             : `${curso.servicioNombre} ${curso.dia} ${curso.hora}`;
 
           const { data: nC } = await supabase.from("clases").insert([{
-            disciplina_id: curso.disciplinaId, modalidad: modalidad, dia_semana: curso.dia,
+            disciplina_id: curso.disciplinaId, modalidad: mod, dia_semana: curso.dia,
             hora_inicio: curso.hora, profesor: curso.profesor, sala: claseSala,
-            capacidad_max: modalidad === "Grupal" ? 6 : (modalidad === "Duo" ? 2 : 1)
+            capacidad_max: mod === "Grupal" ? 6 : (mod === "Duo" ? 2 : 1)
           }]).select().single();
           claseFinalId = nC?.id;
         }
@@ -263,7 +239,6 @@ export default function ProspectosPage() {
         }
       }
 
-      // 4. Finanzas
       const mesActualStr = new Date().toISOString().slice(0, 7);
       const transaccionesAInsertar = [];
       if (cobrarMatricula) transaccionesAInsertar.push({ student_id: alumno.id, tipo_pago: "Incorporación", metodo_pago: "Transferencia", mes_imputado: mesActualStr, monto: montoIncorporacion, detalle: "Pago Matrícula Inicial" });
@@ -307,7 +282,6 @@ export default function ProspectosPage() {
         </button>
       </div>
 
-      {/* TABLA DEL EMBUDO */}
       <div className="saas-card overflow-hidden">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -343,7 +317,6 @@ export default function ProspectosPage() {
         </table>
       </div>
 
-      {/* MODAL MATRÍCULA (NUEVO MOTOR INTELIGENTE) */}
       {isMatriculaModalOpen && (
         <div className="fixed inset-0 bg-[#0B132D]/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-white p-8 rounded-[24px] shadow-2xl w-full max-w-5xl border-t-8 border-[#FC6827] max-h-[95vh] overflow-y-auto custom-scrollbar">
@@ -361,18 +334,15 @@ export default function ProspectosPage() {
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               
-              {/* COLUMNA IZQUIERDA: CUENTA FAMILIAR Y FINANZAS */}
               <div className="space-y-6">
                 
-                {/* 1. Titular Inteligente */}
                 <div className="bg-orange-50 p-6 rounded-2xl border border-orange-200 relative overflow-hidden">
                   <h3 className="text-xs font-black uppercase tracking-widest mb-4 text-[#FC6827]">1. Cuenta Titular de Pago</h3>
                   
-                  {/* Buscador */}
                   {!cuentaSeleccionadaId && (
                     <div className="mb-4 relative">
                       <input 
-                        type="text" placeholder="🔍 Buscar Apoderado Existente (Ej: Shuy Ling)..." 
+                        type="text" placeholder="🔍 Buscar Apoderado Existente..." 
                         value={busquedaCuenta} onChange={e=>setBusquedaCuenta(e.target.value)}
                         className="w-full border border-orange-300 p-2.5 rounded-xl text-sm outline-none bg-white shadow-sm"
                       />
@@ -407,7 +377,6 @@ export default function ProspectosPage() {
                   </div>
                 </div>
 
-                {/* 2. Liquidación */}
                 <div className="bg-[#0B132D] p-6 rounded-2xl text-white shadow-lg">
                   <h3 className="text-[10px] font-black text-white/50 uppercase tracking-widest mb-4">2. Liquidación Financiera</h3>
                   
@@ -437,14 +406,11 @@ export default function ProspectosPage() {
 
               </div>
 
-              {/* COLUMNA DERECHA: ASIGNACIÓN DE CURSOS */}
               <div className="space-y-6">
                 
-                {/* 3. Panel de Asignación */}
                 <div className="bg-blue-50 p-6 rounded-2xl border border-blue-200">
                   <h3 className="text-xs font-black uppercase tracking-widest mb-4 text-[#0466C8]">3. Asignación a Malla Logística</h3>
                   
-                  {/* Pestañas Crear vs Existente */}
                   <div className="flex bg-white rounded-lg p-1 border border-blue-100 mb-4">
                     <button onClick={() => setModoClase("existente")} className={`flex-1 py-1.5 text-xs font-bold rounded ${modoClase==='existente'?'bg-blue-100 text-[#0466C8]':'text-slate-500'}`}>Asignar a Grupo</button>
                     <button onClick={() => setModoClase("nueva")} className={`flex-1 py-1.5 text-xs font-bold rounded ${modoClase==='nueva'?'bg-blue-100 text-[#0466C8]':'text-slate-500'}`}>Crear Clase Nueva</button>
@@ -455,15 +421,20 @@ export default function ProspectosPage() {
                       <select value={claseExistenteId} onChange={e=>setClaseExistenteId(e.target.value)} className="w-full border border-blue-200 p-2.5 rounded-xl text-sm outline-none bg-white">
                         <option value="">Seleccionar grupo disponible...</option>
                         {clasesCatalogo.filter(c => c.modalidad !== "Individual" || c.inscripciones[0]?.count === 0).map(c => (
-                          <option key={c.id} value={c.id}>{c.disciplinas?.nombre} ({c.dia_semana} {c.hora_inicio.substring(0,5)}) - Prof: {c.profesor}</option>
+                          <option key={c.id} value={c.id}>{c.disciplinas?.nombre} ({c.modalidad}) - {c.dia_semana} {c.hora_inicio.substring(0,5)} | Prof: {c.profesor}</option>
                         ))}
                       </select>
                     ) : (
                       <>
                         <div className="grid grid-cols-2 gap-3">
                           <select value={addServicioId} onChange={e=>setAddServicioId(e.target.value)} className="col-span-2 border border-blue-200 p-2.5 rounded-xl text-sm font-bold outline-none bg-white">
-                            <option value="">Seleccionar Servicio/Modalidad...</option>
+                            <option value="">Seleccionar Disciplina...</option>
                             {disciplinas.map(d => <option key={d.id} value={d.id}>{d.nombre} (${d.precio_base?.toLocaleString('es-CL')})</option>)}
+                          </select>
+                          <select value={addModalidad} onChange={e=>setAddModalidad(e.target.value)} className="col-span-2 border border-blue-200 p-2.5 rounded-xl text-sm font-bold outline-none bg-white text-[#0B132D]">
+                            <option value="Individual">Modalidad: Individual (1 cupo)</option>
+                            <option value="Duo">Modalidad: Dúo (2 cupos)</option>
+                            <option value="Grupal">Modalidad: Grupal (6 cupos)</option>
                           </select>
                           <select value={addDia} onChange={e=>setAddDia(e.target.value)} className="border border-blue-200 p-2.5 rounded-xl text-sm outline-none bg-white">{diasSemana.map(d=><option key={d} value={d}>{d}</option>)}</select>
                           <select value={addHora} onChange={e=>setAddHora(e.target.value)} className="border border-blue-200 p-2.5 rounded-xl text-sm outline-none bg-white"><option value="">Hora (24h)</option>{generarOpcionesHora()}</select>
@@ -489,7 +460,6 @@ export default function ProspectosPage() {
                   </div>
                 </div>
 
-                {/* 4. Carrito Resumen */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200">
                   <h3 className="text-[10px] font-black uppercase tracking-widest mb-3 text-slate-500 border-b pb-2">Cursos a Inscribir ({cursosAInscribir.length})</h3>
                   {cursosAInscribir.length === 0 ? <p className="text-xs text-slate-400 text-center py-4 italic">No has añadido cursos.</p> : (
@@ -497,7 +467,7 @@ export default function ProspectosPage() {
                       {cursosAInscribir.map(c => (
                         <div key={c.id} className="flex justify-between items-center bg-slate-50 border border-slate-100 p-3 rounded-xl">
                           <div>
-                            <p className="font-bold text-sm text-[#0B132D]">{c.servicioNombre} <span className="text-[9px] uppercase bg-slate-200 text-slate-500 px-1 rounded ml-1">{c.tipo}</span></p>
+                            <p className="font-bold text-sm text-[#0B132D]">{c.servicioNombre} <span className="text-[9px] uppercase bg-slate-200 text-slate-500 px-1 rounded ml-1">{c.modalidad}</span></p>
                             <p className="text-[10px] font-bold text-[#0466C8]">{c.dia} {c.hora} | Prof: {c.profesor}</p>
                             <p className="text-[10px] text-slate-500">Prorrateo: {c.clasesRestantes}/4 clases</p>
                           </div>
@@ -521,7 +491,6 @@ export default function ProspectosPage() {
         </div>
       )}
 
-      {/* MODALES CLÁSICOS */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-[#0B132D]/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white p-8 rounded-[24px] w-full max-w-md border-t-8 border-[#0466C8]">
