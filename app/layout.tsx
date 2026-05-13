@@ -10,14 +10,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const isActive = (path: string) => pathname === path;
 
+  // Menú actualizado: Eliminamos "Migración" de aquí
   const navItems = [
     { name: "Visión General", path: "/", icon: "📊" },
     { name: "Prospectos", path: "/prospectos", icon: "🎯" },
     { name: "Alumnos", path: "/alumnos", icon: "🎓" },
     { name: "Cursos y Horarios", path: "/cursos", icon: "🎸" },
-    { name: "Pase de Lista", path: "/asistencias", icon: "📝" }, // <-- Link agregado
-    { name: "Finanzas", path: "/finanzas", icon: "💳" },
-    { name: "Migración", path: "/migracion", icon: "⚙️" }, 
+    { name: "Pase de Lista", path: "/asistencias", icon: "📝" },
+    { name: "Finanzas", path: "/finanzas", icon: "💳" }
   ];
 
   return (
